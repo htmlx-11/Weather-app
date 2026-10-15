@@ -54,70 +54,493 @@ input,button{font:inherit;border:1px solid var(--line);border-radius:12px;paddin
   </section>
 </div>
 <div class="footer">Weather data by Open-Meteo · No API key required</div>
-</main>
 <script>
-const $=id=>document.getElementById(id);
-let isF=false, current={lat:6.5244,lon:3.3792,name:"Lagos",country:"Nigeria"};
-const codes={
-  0:["Clear sky","☀️"],1:["Mainly clear","🌤️"],2:["Partly cloudy","⛅"],3:["Overcast","☁️"],
-  45:["Fog","🌫️"],48:["Depositing rime fog","🌫️"],51:["Light drizzle","🌦️"],53:["Drizzle","🌦️"],55:["Dense drizzle","🌧️"],
-  56:["Freezing drizzle","🌧️"],57:["Heavy freezing drizzle","🌧️"],61:["Slight rain","🌦️"],63:["Moderate rain","🌧️"],65:["Heavy rain","🌧️"],
-  66:["Freezing rain","🌧️"],67:["Heavy freezing rain","🌧️"],71:["Slight snow","🌨️"],73:["Moderate snow","🌨️"],75:["Heavy snow","❄️"],
-  77:["Snow grains","🌨️"],80:["Rain showers","🌦️"],81:["Moderate showers","🌧️"],82:["Violent showers","⛈️"],85:["Snow showers","🌨️"],86:["Heavy snow showers","❄️"],
-  izzle:["Thunderstorm","⛈️"],95:["Thunderstorm","⛈️"],96:["Thunderstorm with hail","⛈️"],99:["Thunderstorm with heavy hail","⛈️"]
+// ==========================================
+// WEATHERLY — UPGRADED WEATHER ENGINE
+// ==========================================
+
+const $ = id => document.getElementById(id);
+
+let isF = false;
+let requestId = 0;
+
+let current = {
+    lat: 6.5244,
+    lon: 3.3792,
+    name: "Lagos",
+    country: "Nigeria"
 };
-function weather(code){return codes[code]||["Weather conditions","🌡️"]}
-function temp(c){return Math.round(isF?c*9/5+32:c)+"°"}
-function wind(v){return `${Math.round(v*(isF?0.621371:1))} ${isF?"mph":"km/h"}`}
-function time(s){return s?new Date(s).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"--:--"}
-function day(s,i){return i===0?"Today":new Date(s+"T12:00:00").toLocaleDateString([],{weekday:"short"})}
-async function loadWeather(){
-  $("error").textContent="";
-  $("place").textContent=current.name+(current.country?", "+current.country:"");
-  $("condition").textContent="Fetching latest forecast…";
-  try{
-    const url=`https://api.open-meteo.com/v1/forecast?latitude=${current.lat}&longitude=${current.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max,sunrise,sunset&forecast_days=7&timezone=auto`;
-    const res=await fetch(url);if(!res.ok)throw Error("Weather service returned an error.");const d=await res.json();
-    const c=d.current, w=weather(c.weather_code);
-    $("date").textContent=new Date().toLocaleDateString([],{weekday:"long",month:"long",day:"numeric"});
-    $("temp").textContent=temp(c.temperature_2m);$("condition").textContent=w[0];$("bigIcon").textContent=w[1];
-    $("humidity").textContent=c.relative_humidity_2m+"%";$("wind").textContent=wind(c.wind_speed_10m);
-    $("feels").textContent="Feels like "+temp(c.apparent_temperature);$("feelsStat").textContent=temp(c.apparent_temperature);
-    $("rain").textContent=c.precipitation+" mm";$("uv").textContent=d.daily.uv_index_max[0]??"--";
-    $("sunrise").textContent=time(d.daily.sunrise[0]);
-    const now=new Date(c.time).getTime(), start=d.hourly.time.findIndex(t=>new Date(t).getTime()>=now);
-    $("hourly").innerHTML=Array.from({length:24},(_,i)=>start+i).filter(i=>i<d.hourly.time.length).map(i=>{
-      const hw=weather(d.hourly.weather_code[i]);
-      return `<div class="hour"><small>${i===start?"Now":time(d.hourly.time[i])}</small><div class="ico">${hw[1]}</div><b>${temp(d.hourly.temperature_2m[i])}</b><small>💧 ${d.hourly.precipitation_probability[i]??0}%</small></div>`
-    }).join("");
-    const lows=d.daily.temperature_2m_min, highs=d.daily.temperature_2m_max, min=Math.min(...lows),max=Math.max(...highs),span=max-min||1;
-    $("daily").innerHTML=d.daily.time.map((date,i)=>{
-      const dw=weather(d.daily.weather_code[i]),left=((lows[i]-min)/span)*100,width=Math.max(5,((highs[i]-lows[i])/span)*100);
-      return `<div class="day"><div class="dayname">${day(date,i)}<div class="muted">${dw[0]}</div></div><div class="dayicon">${dw[1]}</div><div class="bar"><span style="margin-left:${left}%;width:${width}%"></span></div><div class="range"><small>${temp(lows[i])}</small><b>${temp(highs[i])}</b></div></div>`
-    }).join("");
-  }catch(e){$("condition").textContent="Could not load weather";$("error").textContent="Check your internet connection and try again."}
+
+// Weather codes from the Open-Meteo API
+const codes = {
+    0: ["Clear sky", "☀️"],
+    1: ["Mainly clear", "🌤️"],
+    2: ["Partly cloudy", "⛅"],
+    3: ["Overcast", "☁️"],
+    45: ["Fog", "🌫️"],
+    48: ["Depositing rime fog", "🌫️"],
+    51: ["Light drizzle", "🌦️"],
+    53: ["Drizzle", "🌦️"],
+    55: ["Dense drizzle", "🌧️"],
+    56: ["Freezing drizzle", "🌧️"],
+    57: ["Heavy freezing drizzle", "🌧️"],
+    61: ["Slight rain", "🌦️"],
+    63: ["Moderate rain", "🌧️"],
+    65: ["Heavy rain", "🌧️"],
+    66: ["Freezing rain", "🌧️"],
+    67: ["Heavy freezing rain", "🌧️"],
+    71: ["Slight snow", "🌨️"],
+    73: ["Moderate snow", "🌨️"],
+    75: ["Heavy snow", "❄️"],
+    77: ["Snow grains", "🌨️"],
+    80: ["Rain showers", "🌦️"],
+    81: ["Moderate showers", "🌧️"],
+    82: ["Violent showers", "⛈️"],
+    85: ["Snow showers", "🌨️"],
+    86: ["Heavy snow showers", "❄️"],
+    95: ["Thunderstorm", "⛈️"],
+    96: ["Thunderstorm with hail", "⛈️"],
+    99: ["Thunderstorm with heavy hail", "⛈️"]
+};
+
+function weather(code) {
+    return codes[code] || ["Unknown conditions", "🌡️"];
 }
-async function searchCity(name){
-  if(!name.trim())return;
-  $("error").textContent="Searching…";
-  try{
-    const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=en&format=json`);
-    const d=await r.json();if(!d.results?.length)throw Error("City not found");
-    const p=d.results[0];current={lat:p.latitude,lon:p.longitude,name:p.name,country:p.country||""};$("cityInput").value="";loadWeather();
-  }catch(e){$("error").textContent="City not found. Try another city name."}
+
+// Convert Celsius to Fahrenheit when required
+function temp(c) {
+    if (c == null || !Number.isFinite(Number(c))) return "--°";
+
+    return Math.round(isF ? c * 9 / 5 + 32 : c) +
+        (isF ? "°F" : "°C");
 }
-$("searchForm").addEventListener("submit",e=>{e.preventDefault();searchCity($("cityInput").value)});
-$("unitBtn").addEventListener("click",()=>{isF=!isF;$("unitBtn").textContent=isF?"Switch to °C":"Switch to °F";loadWeather()});
-$("geoBtn").addEventListener("click",()=>{
-  if(!navigator.geolocation){$("error").textContent="Geolocation is not supported by this browser.";return}
-  $("error").textContent="Finding your location…";
-  navigator.geolocation.getCurrentPosition(async pos=>{
-    current={lat:pos.coords.latitude,lon:pos.coords.longitude,name:"Your location",country:""};
-    try{const r=await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${current.lat}&longitude=${current.lon}&language=en&format=json`);const d=await r.json();if(d.results?.[0]){current.name=d.results[0].name;current.country=d.results[0].country||""}}catch{}
-    loadWeather();
-  },()=>{$("error").textContent="Location permission was denied or unavailable."},{timeout:10000});
+
+// Convert wind speed to the selected unit
+function wind(value) {
+    if (value == null) return "--";
+
+    const speed = isF ? value * 0.621371 : value;
+
+    return `${Math.round(speed)} ${isF ? "mph" : "km/h"}`;
+}
+
+// Format a time using the device's locale
+function time(value) {
+    if (!value) return "--:--";
+
+    return new Date(value).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+
+function day(date, index) {
+    if (index === 0) return "Today";
+
+    return new Date(date + "T12:00:00").toLocaleDateString([], {
+        weekday: "short"
+    });
+}
+
+// Display errors without hiding useful information
+function showError(message) {
+    $("error").textContent = message;
+}
+
+// Check API responses and provide readable errors
+async function getJSON(url) {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(
+            `Weather service error (${response.status}). Please try again.`
+        );
+    }
+
+    return response.json();
+}
+
+// ==========================================
+// LOAD WEATHER
+// ==========================================
+
+async function loadWeather() {
+    const thisRequest = ++requestId;
+
+    showError("");
+
+    $("place").textContent =
+        current.name + (current.country ? ", " + current.country : "");
+
+    $("condition").textContent = "Fetching latest forecast…";
+
+    $("hourly").innerHTML =
+        '<span class="muted">Loading hourly forecast…</span>';
+
+    $("daily").innerHTML =
+        '<span class="muted">Loading daily forecast…</span>';
+
+    try {
+        const url =
+            "https://api.open-meteo.com/v1/forecast" +
+            `?latitude=${current.lat}` +
+            `&longitude=${current.lon}` +
+            "&current=temperature_2m,relative_humidity_2m," +
+            "apparent_temperature,is_day,precipitation," +
+            "weather_code,wind_speed_10m" +
+            "&hourly=temperature_2m,precipitation_probability,weather_code" +
+            "&daily=weather_code,temperature_2m_max,temperature_2m_min," +
+            "uv_index_max,sunrise,sunset" +
+            "&forecast_days=7&timezone=auto";
+
+        const data = await getJSON(url);
+
+        // Ignore older responses if the user searched again
+        if (thisRequest !== requestId) return;
+
+        if (!data.current || !data.daily || !data.hourly) {
+            throw new Error("The weather service returned incomplete data.");
+        }
+
+        const c = data.current;
+        const conditions = weather(c.weather_code);
+
+        // Current weather
+        $("date").textContent = new Date().toLocaleDateString([], {
+            weekday: "long",
+            month: "long",
+            day: "numeric"
+        });
+
+        $("temp").textContent = temp(c.temperature_2m);
+        $("condition").textContent = conditions[0];
+        $("bigIcon").textContent = conditions[1];
+
+        $("humidity").textContent =
+            c.relative_humidity_2m + "%";
+
+        $("wind").textContent =
+            wind(c.wind_speed_10m);
+
+        $("feels").textContent =
+            "Feels like " + temp(c.apparent_temperature);
+
+        $("feelsStat").textContent =
+            temp(c.apparent_temperature);
+
+        $("rain").textContent =
+            (c.precipitation ?? 0) + " mm";
+
+        $("uv").textContent =
+            data.daily.uv_index_max?.[0] ?? "--";
+
+        $("sunrise").textContent =
+            time(data.daily.sunrise?.[0]);
+
+        // ======================================
+        // NEXT 24 HOURS
+        // ======================================
+
+        const hourly = data.hourly;
+
+        const currentHour = hourly.time.findIndex(
+            t => new Date(t).getTime() >=
+                new Date(c.time).getTime()
+        );
+
+        const start = currentHour < 0 ? 0 : currentHour;
+
+        $("hourly").innerHTML = Array.from(
+            { length: 24 },
+            (_, index) => start + index
+        )
+            .filter(index => index < hourly.time.length)
+            .map(index => {
+                const condition = weather(
+                    hourly.weather_code[index]
+                );
+
+                return `
+                    <div class="hour">
+                        <small>
+                            ${index === start
+                                ? "Now"
+                                : time(hourly.time[index])}
+                        </small>
+
+                        <div class="ico">${condition[1]}</div>
+
+                        <b>${temp(hourly.temperature_2m[index])}</b>
+
+                        <small>
+                            💧 ${hourly.precipitation_probability[index] ?? 0}%
+                        </small>
+                    </div>
+                `;
+            })
+            .join("");
+
+        // ======================================
+        // 7-DAY FORECAST
+        // ======================================
+
+        const daily = data.daily;
+
+        const lows = daily.temperature_2m_min;
+        const highs = daily.temperature_2m_max;
+
+        const minimum = Math.min(...lows);
+        const maximum = Math.max(...highs);
+
+        const span = maximum - minimum || 1;
+
+        $("daily").innerHTML = daily.time.map((date, index) => {
+            const condition = weather(daily.weather_code[index]);
+
+            const left =
+                ((lows[index] - minimum) / span) * 100;
+
+            const width = Math.max(
+                5,
+                ((highs[index] - lows[index]) / span) * 100
+            );
+
+            return `
+                <div class="day">
+                    <div class="dayname">
+                        ${day(date, index)}
+                        <div class="muted">${condition[0]}</div>
+                    </div>
+
+                    <div class="dayicon">${condition[1]}</div>
+
+                    <div class="bar">
+                        <span style="
+                            margin-left:${left}%;
+                            width:${width}%;
+                        "></span>
+                    </div>
+
+                    <div class="range">
+                        <small>${temp(lows[index])}</small>
+                        <b>${temp(highs[index])}</b>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        showError("");
+
+    } catch (error) {
+        if (thisRequest !== requestId) return;
+
+        console.error("Weatherly error:", error);
+
+        $("condition").textContent = "Could not load weather";
+
+        $("hourly").innerHTML =
+            '<span class="muted">Hourly forecast unavailable.</span>';
+
+        $("daily").innerHTML =
+            '<span class="muted">Daily forecast unavailable.</span>';
+
+        showError(
+            error.message ||
+            "Unable to load weather. Check your internet connection."
+        );
+    }
+}
+
+// ==========================================
+// CITY SEARCH
+// ==========================================
+
+async function searchCity(name) {
+    name = name.trim();
+
+    if (!name) {
+        showError("Enter a city name first.");
+        return;
+    }
+
+    showError("Searching for " + name + "…");
+
+    try {
+        const url =
+            "https://geocoding-api.open-meteo.com/v1/search" +
+            `?name=${encodeURIComponent(name)}` +
+            "&count=1&language=en&format=json";
+
+        const data = await getJSON(url);
+
+        if (!data.results?.length) {
+            throw new Error("City not found. Try another name.");
+        }
+
+        const place = data.results[0];
+
+        current = {
+            lat: place.latitude,
+            lon: place.longitude,
+            name: place.name,
+            country: place.country || ""
+        };
+
+        $("cityInput").value = "";
+
+        await loadWeather();
+
+    } catch (error) {
+        showError(
+            error.message || "Unable to search for that city."
+        );
+    }
+}
+
+$("searchForm").addEventListener("submit", event => {
+    event.preventDefault();
+
+    searchCity($("cityInput").value);
 });
+
+// ==========================================
+// TEMPERATURE UNIT SWITCH
+// ==========================================
+
+$("unitBtn").addEventListener("click", () => {
+    isF = !isF;
+
+    $("unitBtn").textContent = isF
+        ? "Switch to °C"
+        : "Switch to °F";
+
+    // Re-render weather in the selected units
+    loadWeather();
+});
+
+// ==========================================
+// LIVE LOCATION
+// ==========================================
+
+async function locateMe() {
+    if (!window.isSecureContext) {
+        showError(
+            "Live location requires HTTPS. Open Weatherly using its GitHub Pages address."
+        );
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        showError(
+            "Your browser does not support live location."
+        );
+        return;
+    }
+
+    const button = $("geoBtn");
+
+    button.disabled = true;
+    button.textContent = "Locating…";
+
+    showError("Requesting your location…");
+
+    // Get the device's coordinates
+    navigator.geolocation.getCurrentPosition(
+        async position => {
+            try {
+                current = {
+                    lat: position.coords.latitude,
+                    lon: position.coords.longitude,
+                    name: "Your location",
+                    country: ""
+                };
+
+                showError("Location found! Loading local weather…");
+
+                // Reverse geocode coordinates into a place name
+                try {
+                    const url =
+                        "https://geocoding-api.open-meteo.com/v1/reverse" +
+                        `?latitude=${current.lat}` +
+                        `&longitude=${current.lon}` +
+                        "&language=en&format=json";
+
+                    const data = await getJSON(url);
+
+                    if (data.results?.length) {
+                        const place = data.results[0];
+
+                        current.name =
+                            place.name ||
+                            place.city ||
+                            place.locality ||
+                            "Your location";
+
+                        current.country = place.country || "";
+                    }
+                } catch (error) {
+                    // Weather can still load without a place name
+                    console.warn("Reverse geocoding failed:", error);
+                }
+
+                await loadWeather();
+
+            } finally {
+                button.disabled = false;
+                button.textContent = "◎ Locate";
+            }
+        },
+
+        error => {
+            button.disabled = false;
+            button.textContent = "◎ Locate";
+
+            switch (error.code) {
+                case 1:
+                    showError(
+                        "Location permission denied. Allow location access for this site in Chrome settings, then try again."
+                    );
+                    break;
+
+                case 2:
+                    showError(
+                        "Your location is unavailable. Check your device's location setting and try again."
+                    );
+                    break;
+
+                case 3:
+                    showError(
+                        "Location request timed out. Try again with your device's location turned on."
+                    );
+                    break;
+
+                default:
+                    showError(
+                        "Unable to get your location. Please try again."
+                    );
+            }
+        },
+
+        {
+            enableHighAccuracy: false,
+            timeout: 20000,
+            maximumAge: 60000
+        }
+    );
+}
+
+$("geoBtn").addEventListener("click", locateMe);
+
+// ==========================================
+// INITIAL WEATHER
+// ==========================================
+
 loadWeather();
+
+// Refresh the weather every 10 minutes
+setInterval(() => {
+    loadWeather();
+}, 10 * 60 * 1000);
 </script>
 </body>
 </html>
